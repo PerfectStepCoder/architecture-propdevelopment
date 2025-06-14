@@ -1,0 +1,73 @@
+*** Управление трафиком внутри кластера Kubertnetes ***
+
+Namespace: Все сервисы развёрнуты в одном namespace -> propdevelopment
+Сервисы: Четыре сервиса с метками role=front-end, role=back-end-api, 
+         role=admin-front-end, role=admin-back-end-api. Каждый сервис использует образ nginx и открывает порт 80
+Новый сервис: Будет создан пятый под с меткой role=isolated-service и изолирован от других подов с помощью NetworkPolicy
+Изоляция трафика: Используем NetworkPolicy для запрета входящего и исходящего трафика к/от нового сервиса, за исключением необходимых взаимодействий 
+                  (например, с внешними клиентами через ingress, если требуется).
+
+1) Развёртывание сервисов (управляем кластером в k8s с помощью утилиты kubectl)
+
+# Namespace
+> kubectl create namespace propdevelopment
+
+# Сервис 1: front-end-app
+> kubectl run front-end-app --image=nginx --labels role=front-end --expose --port 80 --namespace propdevelopment
+
+# Сервис 2: back-end-api-app
+> kubectl run back-end-api-app --image=nginx --labels role=back-end-api --expose --port 80 --namespace propdevelopment
+
+# Сервис 3: admin-front-end-app
+> kubectl run admin-front-end-app --image=nginx --labels role=admin-front-end --expose --port 80 --namespace propdevelopment
+
+# Сервис 4: admin-back-end-api-app
+> kubectl run admin-back-end-api-app --image=nginx --labels role=admin-back-end-api --expose --port 80 --namespace propdevelopment
+
+Также доступен манифест с выше указанными сервисами в файле: services.yaml
+Применение манифеста: 
+> kubectl apply -f services.yaml
+
+Проверка все ли ок:
+> kubectl get pods -n propdevelopment
+> kubectl get svc -n propdevelopment
+
+2) Создание нового изолированного сервиса
+   Новый под с меткой role=isolated-service и сервис для него. Этот под будет изолирован от других подов 
+   с помощью NetworkPolicy.
+
+   Манифест доступен в файле: isolated_service.yaml
+
+   Как всегда применим манифест: kubectl apply -f isolated_service.yaml
+
+3) Изоляция трафика с помощью NetworkPolicy
+   
+   Чтобы изолировать под isolated-service-app от других подов в namespace propdevelopment, создадем NetworkPolicy, которая:
+    - запрещает весь входящий и исходящий трафик к/от пода с меткой role=isolated-service, 
+      за исключением, например, внешнего доступа через ingress (если требуется)
+    - разрешает трафик между другими подами (например, front-end-app и back-end-api-app)
+
+   Манифест доступен в файле: network_policy.yaml
+
+   Как всегда применим манифест: kubectl apply -f network_policy.yaml
+
+   Пояснения: 
+   - isolate-isolated-service 
+     а) Применяется к подам с меткой role=isolated-service
+     б) ingress: [] и egress: [] означают полный запрет входящего и исходящего трафика (изоляция от всех подов)
+   - allow-other-services
+     Разрешает трафик между подами с метками role=front-end и role=back-end-api (например, фронтенд может обращаться к API)
+   - allow-admin-services
+     Разрешает трафик между подами с метками role=admin-front-end и role=admin-back-end-api
+
+  Проверка политики:
+  > kubectl get networkpolicy -n propdevelopment
+
+  Проверка изоляции:
+  > kubectl get pods -n propdevelopment -o wide
+  > kubectl get svc -n propdevelopment
+
+  Попробуйте получить доступ к isolated-service-app из другого пода(ожидается ошибка, трафик заблокирован).:
+  > kubectl exec -n propdevelopment front-end-app -- curl http://isolated-service-app
+
+  
